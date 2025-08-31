@@ -42,16 +42,23 @@
             z-index: 10;
         }
 
+        #lives-board {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+            z-index: 10;
+        }
+
         #player {
             position: absolute;
             bottom: 5px;
-            /* transform: translateX(-50%) 삭제 */
             width: 90px;
             height: 130px;
             z-index: 5;
             transition: left 0.1s linear, transform 0.1s ease-out;
-            /* 충돌 영역 시각화를 위해 임시 테두리 추가 */
-            /* border: 1px solid red; */
         }
         #player img {
             width: 100%;
@@ -66,6 +73,7 @@
             transform: scaleX(1);
         }
 
+        /* 기본 김밥 스타일 */
         .gimbap {
             position: absolute;
             top: -50px;
@@ -78,9 +86,7 @@
             justify-content: center;
             align-items: center;
             box-sizing: border-box;
-            /* border: 1px solid blue; */
         }
-
         .gimbap::before {
             content: '';
             position: absolute;
@@ -94,7 +100,15 @@
             justify-content: center;
             align-items: center;
         }
+        /* 김치 김밥 스타일 */
+        .gimbap.kimchi {
+            background-color: #e21e1e; /* 빨간색 김 */
+        }
+        .gimbap.kimchi::before {
+            border: 2px solid #e21e1e; /* 빨간색 테두리 */
+        }
 
+        /* 김밥 내부 재료 */
         .gimbap .face {
             position: absolute;
             z-index: 2;
@@ -140,6 +154,16 @@
             top: 55%; right: 20%;
         }
 
+        .star-item {
+            position: absolute;
+            top: -50px;
+            width: 40px;
+            height: 40px;
+            background-color: gold;
+            clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+            z-index: 4;
+        }
+
         #game-over-screen {
             position: absolute;
             top: 0;
@@ -171,6 +195,7 @@
 <body>
     <div id="game-container">
         <div id="score-board">점수: <span id="score">0</span></div>
+        <div id="lives-board">목숨: <span id="lives">3</span></div>
         <div id="player">
             <img src="esther_cute.jpg" alt="플레이어 캐릭터">
         </div>
@@ -185,18 +210,21 @@
         const gameContainer = document.getElementById('game-container');
         const player = document.getElementById('player');
         const scoreBoard = document.getElementById('score-board');
+        const livesBoard = document.getElementById('lives-board');
         const gameOverScreen = document.getElementById('game-over-screen');
         const finalScoreDisplay = document.getElementById('final-score');
         const restartBtn = document.getElementById('restart-btn');
 
         let gameRunning = false;
         let score = 0;
-        // playerX 초기 위치를 player의 너비 절반을 빼서 중앙에 맞춤
+        let lives = 3;
         let playerX = gameContainer.clientWidth / 2 - player.clientWidth / 2;
         let playerSpeed = 8;
         let gimbapSpawnIntervalId;
         let gimbapFallSpeed = 4;
         let gimbaps = [];
+        let stars = [];
+        let gimbapPassedCount = 0;
         let gameLoopId;
         let scoreUpdateId;
 
@@ -212,9 +240,24 @@
             }
         }
 
+        function updateLives(amount) {
+            lives += amount;
+            if (lives < 0) lives = 0;
+            livesBoard.textContent = `목숨: ${lives}`;
+            if (lives === 0) {
+                endGame();
+            }
+        }
+
         function createGimbap() {
             const gimbap = document.createElement('div');
-            gimbap.classList.add('gimbap');
+            const isKimchiGimbap = Math.random() < 1/6; // 6분의 1 확률
+
+            if (isKimchiGimbap) {
+                gimbap.classList.add('gimbap', 'kimchi');
+            } else {
+                gimbap.classList.add('gimbap');
+            }
             
             const faceDiv = document.createElement('div');
             faceDiv.classList.add('face');
@@ -241,20 +284,46 @@
             gimbap.style.height = `${size}px`;
             gimbap.style.left = `${Math.random() * (gameContainer.clientWidth - size)}px`;
             gameContainer.appendChild(gimbap);
-            gimbaps.push({ el: gimbap, y: -size });
+            
+            const speed = isKimchiGimbap ? gimbapFallSpeed * 2 : gimbapFallSpeed;
+            gimbaps.push({ el: gimbap, y: -size, speed: speed });
         }
 
-        function checkCircleRectCollision(circle, rect) {
-            const circleX = circle.x + circle.radius;
-            const circleY = circle.y + circle.radius;
+        function createStar() {
+            const star = document.createElement('div');
+            star.classList.add('star-item');
+            const size = 40;
+            star.style.width = `${size}px`;
+            star.style.height = `${size}px`;
+            star.style.left = `${Math.random() * (gameContainer.clientWidth - size)}px`;
+            gameContainer.appendChild(star);
+            stars.push({ el: star, y: -size, speed: gimbapFallSpeed + 5 });
+        }
 
-            const nearestX = Math.max(rect.x, Math.min(circleX, rect.x + rect.width));
-            const nearestY = Math.max(rect.y, Math.min(circleY, rect.y + rect.height));
+        function checkCollision(itemRect, playerRect) {
+            const itemCircle = {
+                x: parseFloat(itemRect.el.style.left),
+                y: itemRect.y,
+                radius: itemRect.el.getBoundingClientRect().width / 2
+            };
+
+            const playerX = player.getBoundingClientRect().left - gameContainer.getBoundingClientRect().left;
+            const playerRectObj = {
+                x: playerX,
+                y: gameContainer.clientHeight - player.clientHeight - 5,
+                width: player.clientWidth,
+                height: player.clientHeight
+            };
+
+            const circleX = itemCircle.x + itemCircle.radius;
+            const circleY = itemCircle.y + itemCircle.radius;
+            const nearestX = Math.max(playerRectObj.x, Math.min(circleX, playerRectObj.x + playerRectObj.width));
+            const nearestY = Math.max(playerRectObj.y, Math.min(circleY, playerRectObj.y + playerRectObj.height));
 
             const deltaX = circleX - nearestX;
             const deltaY = circleY - nearestY;
 
-            return (deltaX * deltaX + deltaY * deltaY) < (circle.radius * circle.radius);
+            return (deltaX * deltaX + deltaY * deltaY) < (itemCircle.radius * itemCircle.radius);
         }
 
         function gameLoop() {
@@ -276,32 +345,38 @@
             }
 
             gimbaps.forEach(gimbap => {
-                gimbap.y += gimbapFallSpeed;
+                gimbap.y += gimbap.speed; // 각 김밥의 개별 속도 사용
                 gimbap.el.style.top = `${gimbap.y}px`;
             });
-
             gimbaps = gimbaps.filter(gimbap => {
-                const playerRect = {
-                    x: playerX,
-                    y: gameContainer.clientHeight - player.clientHeight - 5,
-                    width: player.clientWidth,
-                    height: player.clientHeight
-                };
-                
-                const gimbapRect = gimbap.el.getBoundingClientRect();
-                const gimbapCircle = {
-                    x: parseFloat(gimbap.el.style.left),
-                    y: gimbap.y,
-                    radius: gimbapRect.width / 2
-                };
-
-                if (checkCircleRectCollision(gimbapCircle, playerRect)) {
-                    endGame();
+                if (checkCollision(gimbap, player)) {
+                    updateLives(-1);
+                    gimbap.el.remove();
                     return false;
                 }
-
                 if (gimbap.y > gameContainer.clientHeight) {
                     gimbap.el.remove();
+                    gimbapPassedCount++;
+                    if (gimbapPassedCount > 0 && gimbapPassedCount % 10 === 0) {
+                        createStar();
+                    }
+                    return false;
+                }
+                return true;
+            });
+            
+            stars.forEach(star => {
+                star.y += star.speed;
+                star.el.style.top = `${star.y}px`;
+            });
+            stars = stars.filter(star => {
+                if (checkCollision(star, player)) {
+                    updateLives(1);
+                    star.el.remove();
+                    return false;
+                }
+                if (star.y > gameContainer.clientHeight) {
+                    star.el.remove();
                     return false;
                 }
                 return true;
@@ -368,15 +443,18 @@
         function startGame() {
             gameRunning = true;
             score = 0;
+            lives = 3;
+            gimbapPassedCount = 0;
             
-            const existingGimbaps = gameContainer.querySelectorAll('.gimbap');
-            existingGimbaps.forEach(gimbap => gimbap.remove());
+            const existingItems = gameContainer.querySelectorAll('.gimbap, .star-item');
+            existingItems.forEach(item => item.remove());
             gimbaps = [];
+            stars = [];
             
             scoreBoard.textContent = `점수: 0`;
+            livesBoard.textContent = `목숨: 3`;
             gameOverScreen.style.display = 'none';
 
-            // playerX 초기 위치를 player의 너비 절반을 빼서 중앙에 맞춤
             playerX = gameContainer.clientWidth / 2 - player.clientWidth / 2;
             player.style.left = `${playerX}px`;
             
