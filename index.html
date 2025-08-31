@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>김밥 피하기 게임</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #FFFFFF;
+            user-select: none;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        #game-container {
+            position: relative;
+            width: 80vmin;
+            height: 80vmin;
+            max-width: 500px;
+            max-height: 500px;
+            border: 5px solid #333;
+            background-color: #FFFFFF;
+            overflow: hidden;
+            touch-action: pan-y;
+        }
+
+        #score-board {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 2em;
+            font-weight: bold;
+            color: #333;
+            z-index: 10;
+        }
+
+        #player {
+            position: absolute;
+            bottom: 5px;
+            /* transform: translateX(-50%) 삭제 */
+            width: 90px;
+            height: 130px;
+            z-index: 5;
+            transition: left 0.1s linear, transform 0.1s ease-out;
+            /* 충돌 영역 시각화를 위해 임시 테두리 추가 */
+            /* border: 1px solid red; */
+        }
+        #player img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            image-rendering: pixelated;
+        }
+        #player.flipped {
+            transform: scaleX(-1);
+        }
+        #player.unflipped {
+            transform: scaleX(1);
+        }
+
+        .gimbap {
+            position: absolute;
+            top: -50px;
+            width: 50px;
+            height: 50px;
+            background-color: #333;
+            border-radius: 50%;
+            z-index: 4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-sizing: border-box;
+            /* border: 1px solid blue; */
+        }
+
+        .gimbap::before {
+            content: '';
+            position: absolute;
+            width: 80%;
+            height: 80%;
+            background-color: #fff;
+            border-radius: 50%;
+            border: 2px solid #333;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .gimbap .face {
+            position: absolute;
+            z-index: 2;
+        }
+        .gimbap .eye {
+            width: 5px;
+            height: 5px;
+            background-color: #333;
+            border-radius: 50%;
+            position: absolute;
+            top: 35%;
+        }
+        .gimbap .eye.left { left: 30%; }
+        .gimbap .eye.right { right: 30%; }
+        .gimbap .mouth {
+            width: 15px;
+            height: 3px;
+            background-color: #333;
+            border-radius: 0 0 5px 5px;
+            position: absolute;
+            bottom: 30%;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .gimbap .ingredient {
+            position: absolute;
+            border-radius: 50%;
+            background-color: orange;
+            z-index: 1;
+        }
+        .gimbap .carrot {
+            width: 10px; height: 10px; background-color: orange;
+            top: 20%; left: 40%;
+            transform: rotate(45deg);
+            border-radius: 3px;
+        }
+        .gimbap .egg {
+            width: 12px; height: 12px; background-color: #fce883;
+            top: 50%; left: 25%;
+        }
+        .gimbap .spinach {
+            width: 8px; height: 8px; background-color: #6B8E23;
+            top: 55%; right: 20%;
+        }
+
+        #game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            z-index: 20;
+        }
+
+        #game-over-screen button {
+            padding: 10px 20px;
+            font-size: 1em;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="score-board">점수: <span id="score">0</span></div>
+        <div id="player">
+            <img src="esther_cute.jpg" alt="플레이어 캐릭터">
+        </div>
+        <div id="game-over-screen">
+            <h2>게임 오버!</h2>
+            <p>최종 점수: <span id="final-score">0</span></p>
+            <button id="restart-btn">다시 시작</button>
+        </div>
+    </div>
+
+    <script>
+        const gameContainer = document.getElementById('game-container');
+        const player = document.getElementById('player');
+        const scoreBoard = document.getElementById('score-board');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const restartBtn = document.getElementById('restart-btn');
+
+        let gameRunning = false;
+        let score = 0;
+        // playerX 초기 위치를 player의 너비 절반을 빼서 중앙에 맞춤
+        let playerX = gameContainer.clientWidth / 2 - player.clientWidth / 2;
+        let playerSpeed = 8;
+        let gimbapSpawnIntervalId;
+        let gimbapFallSpeed = 4;
+        let gimbaps = [];
+        let gameLoopId;
+        let scoreUpdateId;
+
+        let touchDirection = 0;
+
+        function updateScore() {
+            score++;
+            scoreBoard.textContent = `점수: ${score}`;
+            if (score > 0 && score % 10 === 0) {
+                gimbapFallSpeed += 0.5;
+                clearInterval(gimbapSpawnIntervalId);
+                gimbapSpawnIntervalId = setInterval(createGimbap, Math.max(300, 1000 - score * 10));
+            }
+        }
+
+        function createGimbap() {
+            const gimbap = document.createElement('div');
+            gimbap.classList.add('gimbap');
+            
+            const faceDiv = document.createElement('div');
+            faceDiv.classList.add('face');
+            const eyeLeft = document.createElement('div');
+            eyeLeft.classList.add('eye', 'left');
+            const eyeRight = document.createElement('div');
+            eyeRight.classList.add('eye', 'right');
+            const mouth = document.createElement('div');
+            mouth.classList.add('mouth');
+            faceDiv.appendChild(eyeLeft);
+            faceDiv.appendChild(eyeRight);
+            faceDiv.appendChild(mouth);
+            gimbap.appendChild(faceDiv);
+
+            const ingredientTypes = ['carrot', 'egg', 'spinach'];
+            for(let i = 0; i < 3; i++) {
+                const ing = document.createElement('div');
+                ing.classList.add('ingredient', ingredientTypes[Math.floor(Math.random() * ingredientTypes.length)]);
+                gimbap.appendChild(ing);
+            }
+
+            const size = 50;
+            gimbap.style.width = `${size}px`;
+            gimbap.style.height = `${size}px`;
+            gimbap.style.left = `${Math.random() * (gameContainer.clientWidth - size)}px`;
+            gameContainer.appendChild(gimbap);
+            gimbaps.push({ el: gimbap, y: -size });
+        }
+
+        function checkCircleRectCollision(circle, rect) {
+            const circleX = circle.x + circle.radius;
+            const circleY = circle.y + circle.radius;
+
+            const nearestX = Math.max(rect.x, Math.min(circleX, rect.x + rect.width));
+            const nearestY = Math.max(rect.y, Math.min(circleY, rect.y + rect.height));
+
+            const deltaX = circleX - nearestX;
+            const deltaY = circleY - nearestY;
+
+            return (deltaX * deltaX + deltaY * deltaY) < (circle.radius * circle.radius);
+        }
+
+        function gameLoop() {
+            if (!gameRunning) {
+                return;
+            }
+
+            if (touchDirection !== 0) {
+                if (touchDirection === -1) {
+                    playerX = Math.max(0, playerX - playerSpeed);
+                    player.classList.remove('flipped');
+                    player.classList.add('unflipped');
+                } else if (touchDirection === 1) {
+                    playerX = Math.min(gameContainer.clientWidth - player.clientWidth, playerX + playerSpeed);
+                    player.classList.remove('unflipped');
+                    player.classList.add('flipped');
+                }
+                player.style.left = `${playerX}px`;
+            }
+
+            gimbaps.forEach(gimbap => {
+                gimbap.y += gimbapFallSpeed;
+                gimbap.el.style.top = `${gimbap.y}px`;
+            });
+
+            gimbaps = gimbaps.filter(gimbap => {
+                const playerRect = {
+                    x: playerX,
+                    y: gameContainer.clientHeight - player.clientHeight - 5,
+                    width: player.clientWidth,
+                    height: player.clientHeight
+                };
+                
+                const gimbapRect = gimbap.el.getBoundingClientRect();
+                const gimbapCircle = {
+                    x: parseFloat(gimbap.el.style.left),
+                    y: gimbap.y,
+                    radius: gimbapRect.width / 2
+                };
+
+                if (checkCircleRectCollision(gimbapCircle, playerRect)) {
+                    endGame();
+                    return false;
+                }
+
+                if (gimbap.y > gameContainer.clientHeight) {
+                    gimbap.el.remove();
+                    return false;
+                }
+                return true;
+            });
+
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (!gameRunning) return;
+            if (e.key === 'ArrowLeft' || e.key === 'a') {
+                touchDirection = -1;
+            } else if (e.key === 'ArrowRight' || e.key === 'd') {
+                touchDirection = 1;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (!gameRunning) return;
+            if ((e.key === 'ArrowLeft' || e.key === 'a') && touchDirection === -1) {
+                touchDirection = 0;
+            } else if ((e.key === 'ArrowRight' || e.key === 'd') && touchDirection === 1) {
+                touchDirection = 0;
+            }
+        });
+        
+        gameContainer.addEventListener('mousedown', (e) => {
+            if (!gameRunning) return;
+            const clickX = e.clientX;
+            const containerRect = gameContainer.getBoundingClientRect();
+            const center = containerRect.left + containerRect.width / 2;
+
+            if (clickX < center) {
+                touchDirection = -1;
+            } else {
+                touchDirection = 1;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!gameRunning) return;
+            touchDirection = 0;
+        });
+
+        gameContainer.addEventListener('touchstart', (e) => {
+            if (!gameRunning) return;
+            e.preventDefault();
+            const touchX = e.touches[0].clientX;
+            const containerRect = gameContainer.getBoundingClientRect();
+            const center = containerRect.left + containerRect.width / 2;
+
+            if (touchX < center) {
+                touchDirection = -1;
+            } else {
+                touchDirection = 1;
+            }
+        }, { passive: false });
+
+        gameContainer.addEventListener('touchend', () => {
+            if (!gameRunning) return;
+            touchDirection = 0;
+        });
+
+        function startGame() {
+            gameRunning = true;
+            score = 0;
+            
+            const existingGimbaps = gameContainer.querySelectorAll('.gimbap');
+            existingGimbaps.forEach(gimbap => gimbap.remove());
+            gimbaps = [];
+            
+            scoreBoard.textContent = `점수: 0`;
+            gameOverScreen.style.display = 'none';
+
+            // playerX 초기 위치를 player의 너비 절반을 빼서 중앙에 맞춤
+            playerX = gameContainer.clientWidth / 2 - player.clientWidth / 2;
+            player.style.left = `${playerX}px`;
+            
+            player.classList.remove('flipped');
+            player.classList.add('unflipped');
+
+            gimbapFallSpeed = 4;
+
+            clearInterval(gimbapSpawnIntervalId);
+            gimbapSpawnIntervalId = setInterval(createGimbap, 1000);
+
+            clearInterval(scoreUpdateId);
+            scoreUpdateId = setInterval(updateScore, 1000);
+            
+            cancelAnimationFrame(gameLoopId);
+            gameLoop();
+        }
+
+        function endGame() {
+            gameRunning = false;
+            clearInterval(gimbapSpawnIntervalId);
+            clearInterval(scoreUpdateId);
+            cancelAnimationFrame(gameLoopId);
+            touchDirection = 0;
+
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.style.display = 'flex';
+        }
+
+        restartBtn.addEventListener('click', startGame);
+
+        startGame();
+    </script>
+</body>
+</html>
